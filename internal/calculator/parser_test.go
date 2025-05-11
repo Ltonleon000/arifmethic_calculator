@@ -65,7 +65,7 @@ func TestParse(t *testing.T) {
 	tests := []struct {
 		name             string
 		expression       string
-		expectedOperator string // Оператор, который должен присутствовать в полученных операциях
+		expectedOperator string // Оператор  который   должен присутствовать   в полученых операциях
 		wantErr          bool
 	}{
 		{

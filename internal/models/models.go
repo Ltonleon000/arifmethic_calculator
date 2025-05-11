@@ -13,6 +13,7 @@ type Expression struct {
 	Expression string            `json:"expression,omitempty"`
 	Status     CalculationStatus `json:"status"`
 	Result     *float64          `json:"result,omitempty"`
+	UserID     string            `json:"user_id" db:"user_id"`
 }
 
 type CalculationRequest struct {

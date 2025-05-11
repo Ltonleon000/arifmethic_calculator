@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bytes"
-	"calculator/internal/models"
-	"encoding/json"
+	"calculator/internal"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -34,92 +32,87 @@ func main() {
 		computingPower = 2
 	}
 
-	orchestratorPort := getEnv("ORCHESTRATOR_PORT", "8080")
+	orchestratorPort := getEnv("ORCHESTRATOR_PORT", "8082")
 	orchestratorHost := getEnv("ORCHESTRATOR_HOST", "localhost")
-	orchestratorURL = getEnv("ORCHESTRATOR_URL", fmt.Sprintf("http://%s:%s", orchestratorHost, orchestratorPort))
+	grpcAddr := fmt.Sprintf("%s:%s", orchestratorHost, orchestratorPort)
+
+	client, err := internal.NewAgentGRPCClient(grpcAddr)
+	if err != nil {
+		log.Fatalf("Ошибка подключения к gRPC серверу оркестратора: %v", err)
+	}
+	defer client.Close()
 
 	var wg sync.WaitGroup
 	log.Printf("Запускаем агента с %d вычислителями\n", computingPower)
 
 	for i := 0; i < computingPower; i++ {
 		wg.Add(1)
-		go worker(i, &wg)
+		go worker(i, &wg, client)
 	}
 
 	wg.Wait()
 }
 
-func worker(id int, wg *sync.WaitGroup) {
-
+func worker(id int, wg *sync.WaitGroup, client *internal.AgentGRPCClient) {
 	defer wg.Done()
-	client := &http.Client{}
-	taskURL := fmt.Sprintf("%s/internal/task", orchestratorURL)
 
 	for {
-		resp, err := http.Get(taskURL)
-		if err != nil {
-			log.Printf("Вычислитель %d: Ошибка получения задачи: %v", id, err)
+		taskMsg, ok := client.GetTask()
+		if !ok || taskMsg == nil {
 			time.Sleep(time.Second)
 			continue
 		}
 
-		if resp.StatusCode == http.StatusNotFound {
-			time.Sleep(time.Second)
+		// Преобразуем аргументы из строк в float64
+		arg1, err1 := strconv.ParseFloat(taskMsg.Arg1, 64)
+		arg2, err2 := strconv.ParseFloat(taskMsg.Arg2, 64)
+		if err1 != nil || err2 != nil {
+			log.Printf("Вычислитель %d: Ошибка преобразования аргументов: %v %v", id, err1, err2)
 			continue
 		}
 
-		var taskResp struct {
-			Task models.Task `json:"task"`
+		// Парсим операцию из составного поля Operation, которое имеет формат "ID||операция"
+		operationData := taskMsg.Operation
+		parts := strings.Split(operationData, "||")
+		var operation string
+		if len(parts) > 1 {
+			// Если есть разделитель "||" - берем вторую часть как операцию
+			operation = parts[1]
+			log.Printf("Вычислитель %d: Распознана операция %s для задачи %s", id, operation, parts[0])
+		} else {
+			// Запасной вариант - если формат старый, берем всё как операцию
+			operation = operationData
+			log.Printf("Вычислитель %d: Используем прямое значение операции: %s", id, operation)
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&taskResp); err != nil {
-			log.Printf("Вычислитель %d: Ошибка декодирования задачи: %v", id, err)
-			resp.Body.Close()
-			continue
-		}
-		resp.Body.Close()
 
 		// имитируем задержку выполнения операции типа длительная операция
-		time.Sleep(time.Duration(taskResp.Task.OperationTime) * time.Millisecond)
+		time.Sleep(time.Duration(taskMsg.OperationTime) * time.Millisecond)
 
 		var result float64
-		switch taskResp.Task.Operation {
+		switch operation {
 		case "+":
-			result = taskResp.Task.Arg1 + taskResp.Task.Arg2
-			log.Printf("Вычислитель %d: %f + %f = %f", id, taskResp.Task.Arg1, taskResp.Task.Arg2, result)
+			result = arg1 + arg2
+			log.Printf("Вычислитель %d: %f + %f = %f", id, arg1, arg2, result)
 		case "-":
-			result = taskResp.Task.Arg1 - taskResp.Task.Arg2
-			log.Printf("Вычислитель %d: %f - %f = %f", id, taskResp.Task.Arg1, taskResp.Task.Arg2, result)
+			result = arg1 - arg2
+			log.Printf("Вычислитель %d: %f - %f = %f", id, arg1, arg2, result)
 		case "*":
-			result = taskResp.Task.Arg1 * taskResp.Task.Arg2
-			log.Printf("Вычислитель %d: %f * %f = %f", id, taskResp.Task.Arg1, taskResp.Task.Arg2, result)
+			result = arg1 * arg2
+			log.Printf("Вычислитель %d: %f * %f = %f", id, arg1, arg2, result)
 		case "/":
-			if taskResp.Task.Arg2 == 0 {
+			if arg2 == 0 {
 				log.Printf("Вычислитель %d: Деление на ноль!", id)
 				continue
 			}
-			result = taskResp.Task.Arg1 / taskResp.Task.Arg2
-			log.Printf("Вычислитель %d: %f / %f = %f", id, taskResp.Task.Arg1, taskResp.Task.Arg2, result)
-		}
-
-		taskResult := models.TaskResult{
-			ID:     taskResp.Task.ID,
-			Result: result,
-		}
-
-		resultJSON, err := json.Marshal(taskResult)
-		if err != nil {
-			log.Printf("Вычислитель %d: Ошибка маршалинга результата: %v", id, err)
+			result = arg1 / arg2
+			log.Printf("Вычислитель %d: %f / %f = %f", id, arg1, arg2, result)
+		default:
+			log.Printf("Вычислитель %d: Неизвестная операция: %s", id, operation)
 			continue
 		}
 
-		_, err = client.Post(
-			taskURL,
-			"application/json",
-			bytes.NewBuffer(resultJSON),
-		)
-		if err != nil {
-			log.Printf("Вычислитель %d: Ошибка отправки результата: %v", id, err)
-			continue
+		if !client.SendResult(taskMsg.Id, result) {
+			log.Printf("Вычислитель %d: Ошибка отправки результата задачи %d", id, taskMsg.Id)
 		}
 	}
 }
