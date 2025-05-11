@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Калькулятор (Демо)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 20px auto;
+            text-align: center;
+        }
+        input {
+            padding: 8px;
+            width: 60%;
+        }
+        button {
+            padding: 8px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        .error {
+            color: red;
+            margin-top: 10px;
+        }
+        .result {
+            margin-top: 20px;
+            font-size: 1.2em;
+        }
+        .status {
+            margin-top: 10px;
+            font-style: italic;
+        }
+        .calculations {
+            margin-top: 20px;
+            text-align: left;
+            border-top: 1px solid #ddd;
+            padding-top: 10px;
+        }
+        .calculation-item {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #eee;
+            border-radius: 5px;
+        }
+        .pending { color: #888; }
+        .processing { color: #ff9800; }
+        .completed { color: #4CAF50; }
+        .error { color: #f44336; }
+    </style>
+</head>
+<body>
+    <h1>Арифметический Калькулятор (ДЕМО)</h1>
+    
+    <div id="calculatorSection">
+        <form id="calculatorForm">
+            <input type="text" id="expression" placeholder="Введите выражение (например: 2+2*3)" required>
+            <button type="submit" id="calculateBtn">Вычислить</button>
+        </form>
+        
+        <div id="error" class="error"></div>
+        <div id="result" class="result"></div>
+        <div id="status" class="status"></div>
+        
+        <div class="calculations">
+            <h3>История вычислений</h3>
+            <div id="calculationsList"></div>
+        </div>
+    </div>
+    
+    <script>
+        // Элементы DOM
+        const expressionInput = document.getElementById('expression');
+        const calculateBtn = document.getElementById('calculateBtn');
+        const errorElement = document.getElementById('error');
+        const resultElement = document.getElementById('result');
+        const statusElement = document.getElementById('status');
+        const calculationsList = document.getElementById('calculationsList');
+        
+        // Хранилище вычислений
+        const calculations = new Map();
+        
+        // Загрузка сохраненных вычислений
+        try {
+            const savedCalcs = localStorage.getItem('demoCalculations');
+            if (savedCalcs) {
+                const parsed = JSON.parse(savedCalcs);
+                for (const [id, calc] of parsed) {
+                    calculations.set(id, calc);
+                }
+            }
+        } catch (e) {
+            console.error('Ошибка при загрузке вычислений:', e);
+        }
+
+        calculateBtn.addEventListener('click', calculate);
+        expressionInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                calculate();
+            }
+        });
+
+        // Функция вычисления
+        async function calculate() {
+            const expression = expressionInput.value.trim();
+            if (!expression) {
+                showError('Введите выражение!');
+                return;
+            }
+            
+            // Проверка синтаксиса
+            const validation = validateExpression(expression);
+            if (!validation.valid) {
+                showError(validation.message);
+                return;
+            }
+            
+            calculateBtn.disabled = true;
+            calculateBtn.textContent = 'Вычисляем...';
+            errorElement.textContent = '';
+            statusElement.textContent = 'Отправка запроса...';
+            resultElement.textContent = '';
+            
+            try {
+                // Генерируем уникальный ID
+                const calculationId = Date.now().toString();
+                
+                // Сохраняем вычисление в статусе pending
+                calculations.set(calculationId, {
+                    expression: expression,
+                    status: 'pending',
+                    result: null,
+                    timestamp: new Date().toLocaleTimeString(),
+                    startTime: Date.now()
+                });
+                updateCalculationsList();
+                saveCalculations();
+                
+                // Имитируем задержку сети
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Имитируем процесс вычисления
+                statusElement.textContent = 'Выполняется вычисление...';
+                calculations.get(calculationId).status = 'processing';
+                updateCalculationsList();
+                saveCalculations();
+                
+                // Имитируем время вычисления
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                // Вычисляем результат
+                let result;
+                try {
+                    result = eval(expression);
+                } catch (e) {
+                    throw new Error('Ошибка вычисления: ' + e.message);
+                }
+                
+                // Обновляем статус и результат
+                const calculation = calculations.get(calculationId);
+                calculation.status = 'completed';
+                calculation.result = result;
+                calculation.executionTime = (Date.now() - calculation.startTime) / 1000;
+                
+                // Обновляем интерфейс
+                resultElement.textContent = `Результат: ${result}`;
+                statusElement.textContent = `Вычисление завершено за ${calculation.executionTime.toFixed(1)} сек.`;
+                updateCalculationsList();
+                saveCalculations();
+                
+            } catch (error) {
+                showError(error.message);
+                statusElement.textContent = '';
+            } finally {
+                calculateBtn.disabled = false;
+                calculateBtn.textContent = 'Вычислить';
+                expressionInput.value = '';
+            }
+        }
+        
+        // Функция проверки синтаксиса выражения
+        function validateExpression(expression) {
+            // Проверка на пустую строку
+            if (!expression.trim()) {
+                return { valid: false, message: 'Выражение не может быть пустым' };
+            }
+            
+            // Проверка на допустимые символы
+            if (!/^[0-9+\-*/().\s]+$/.test(expression)) {
+                return { valid: false, message: 'Выражение содержит недопустимые символы' };
+            }
+            
+            // Проверка на корректность с помощью eval()
+            try {
+                eval(expression);
+                return { valid: true };
+            } catch (e) {
+                return { valid: false, message: 'Некорректное выражение: ' + e.message };
+            }
+        }
+        
+        // Функция обновления списка вычислений
+        function updateCalculationsList() {
+            calculationsList.innerHTML = '';
+            
+            // Сортируем вычисления по времени (последние наверху)
+            const sortedCalculations = Array.from(calculations.entries())
+                .sort((a, b) => {
+                    const timeA = a[1].startTime || 0;
+                    const timeB = b[1].startTime || 0;
+                    return timeB - timeA;
+                });
+            
+            // Выводим не более 10 элементов
+            for (const [id, calc] of sortedCalculations.slice(0, 10)) {
+                const item = document.createElement('div');
+                item.className = 'calculation-item';
+                
+                const statusText = {
+                    'pending': 'Ожидает вычисления',
+                    'processing': 'Вычисляется',
+                    'completed': 'Вычислено',
+                    'error': 'Ошибка'
+                }[calc.status] || calc.status;
+                
+                let executionTimeInfo = '';
+                if (calc.executionTime) {
+                    executionTimeInfo = `<div><small>Время выполнения: ${calc.executionTime.toFixed(1)} сек.</small></div>`;
+                }
+                
+                item.innerHTML = `
+                    <div><strong>Выражение:</strong> ${calc.expression}</div>
+                    <div class="${calc.status}"><strong>Статус:</strong> ${statusText}</div>
+                    ${calc.result !== null ? `<div><strong>Результат:</strong> ${calc.result}</div>` : ''}
+                    ${executionTimeInfo}
+                    <div><small>Время запроса: ${calc.timestamp}</small></div>
+                `;
+                
+                calculationsList.appendChild(item);
+            }
+        }
+        
+        // Сохранение вычислений в localStorage
+        function saveCalculations() {
+            try {
+                localStorage.setItem('demoCalculations', JSON.stringify(Array.from(calculations.entries())));
+            } catch (e) {
+                console.error('Ошибка при сохранении вычислений:', e);
+            }
+        }
+        
+        function showError(message) {
+            errorElement.textContent = message;
+            setTimeout(() => {
+                errorElement.textContent = '';
+            }, 5000); // Скрываем ошибку через 5 секунд
+        }
+        
+        // Обновляем список при загрузке
+        updateCalculationsList();
+    </script>
+</body>
+</html>

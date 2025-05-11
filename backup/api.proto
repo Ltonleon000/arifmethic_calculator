@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package calculator;
+
+option go_package = ".;calculatorpb";
+
+service AgentService {
+  // Агент запрашивает задачу на вычисление
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+  // Агент отправляет результат вычисления
+  rpc SendResult(SendResultRequest) returns (SendResultResponse);
+}
+
+message GetTaskRequest {
+  // Можно добавить идентификатор агента, если нужно
+}
+
+message GetTaskResponse {
+  bool has_task = 1;
+  Task task = 2;
+}
+
+message Task {
+  int64 id = 1;
+  string arg1 = 2;
+  string arg2 = 3;
+  string operation = 4;
+  int64 operation_time = 5;
+}
+
+message SendResultRequest {
+  int64 task_id = 1;
+  double result = 2;
+}
+
+message SendResultResponse {
+  bool ok = 1;
+  string error = 2;
+}

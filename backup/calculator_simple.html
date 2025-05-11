@@ -1,0 +1,452 @@
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Калькулятор (Упрощенная версия)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 20px auto;
+            text-align: center;
+        }
+        input {
+            padding: 8px;
+            width: 60%;
+        }
+        button {
+            padding: 8px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        .error {
+            color: red;
+            margin-top: 10px;
+        }
+        .result {
+            margin-top: 20px;
+            font-size: 1.2em;
+        }
+        .status {
+            margin-top: 10px;
+            font-style: italic;
+        }
+        .calculations {
+            margin-top: 20px;
+            text-align: left;
+            border-top: 1px solid #ddd;
+            padding-top: 10px;
+        }
+        .calculation-item {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #eee;
+            border-radius: 5px;
+        }
+        .pending { color: #888; }
+        .processing { color: #ff9800; }
+        .completed { color: #4CAF50; }
+        .error { color: #f44336; }
+    </style>
+</head>
+<body>
+    <h1>Арифметический Калькулятор</h1>
+    
+    <div id="authSection">
+        <div class="auth-form">
+            <h2>Регистрация</h2>
+            <form id="registerForm">
+                <input type="text" id="registerUsername" placeholder="Имя пользователя" required><br>
+                <input type="password" id="registerPassword" placeholder="Пароль" required><br>
+                <button type="submit">Зарегистрироваться</button>
+            </form>
+        </div>
+        
+        <div class="auth-form">
+            <h2>Вход</h2>
+            <form id="loginForm">
+                <input type="text" id="loginUsername" placeholder="Имя пользователя" required><br>
+                <input type="password" id="loginPassword" placeholder="Пароль" required><br>
+                <button type="submit">Войти</button>
+            </form>
+        </div>
+    </div>
+    
+    <div id="calculatorSection" style="display: none;">
+        <form id="calculatorForm">
+            <input type="text" id="expression" placeholder="Введите выражение (например: 2+2*3)" required>
+            <button type="submit" id="calculateBtn">Вычислить</button>
+        </form>
+        
+        <div id="error" class="error"></div>
+        <div id="result" class="result"></div>
+        <div id="status" class="status"></div>
+        
+        <div class="calculations">
+            <h3>История вычислений</h3>
+            <div id="calculationsList"></div>
+        </div>
+    </div>
+    
+    <script>
+        // Основные переменные
+        let serverUrl = 'http://localhost:8081';
+        let authToken = '';
+        const calculations = new Map();
+
+        // Элементы DOM
+        const loginForm = document.getElementById('loginForm');
+        const registerForm = document.getElementById('registerForm');
+        const calculatorForm = document.getElementById('calculatorForm');
+        const expressionInput = document.getElementById('expression');
+        const calculateBtn = document.getElementById('calculateBtn');
+        const resultElement = document.getElementById('result');
+        const statusElement = document.getElementById('status');
+        const errorElement = document.getElementById('error');
+        const calculationsList = document.getElementById('calculationsList');
+
+        // Загрузка сохраненных вычислений
+        try {
+            const savedCalcs = localStorage.getItem('savedCalculations');
+            if (savedCalcs) {
+                const parsed = JSON.parse(savedCalcs);
+                for (const [id, calc] of parsed) {
+                    calculations.set(id, calc);
+                }
+                console.log('Загружены вычисления из localStorage:', parsed);
+            }
+        } catch (e) {
+            console.error('Ошибка при загрузке вычислений:', e);
+        }
+
+        // Проверка наличия токена в localStorage
+        authToken = localStorage.getItem('authToken') || '';
+        if (authToken) {
+            // Если токен есть, скрываем формы регистрации/логина
+            document.getElementById('authSection').style.display = 'none';
+            document.getElementById('calculatorSection').style.display = 'block';
+            updateCalculationsList();
+        }
+
+        // Обработчики форм
+        registerForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await register();
+        });
+
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await login();
+        });
+
+        calculatorForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await calculate();
+        });
+
+        // Функция регистрации
+        async function register() {
+            const username = document.getElementById('registerUsername').value;
+            const password = document.getElementById('registerPassword').value;
+            
+            try {
+                // Используем login вместо username, как ожидает API
+                const response = await fetch(serverUrl + '/api/v1/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ login: username, password })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Ошибка регистрации: ${response.status}`);
+                }
+                
+                alert('Регистрация успешна! Теперь вы можете войти.');
+                document.getElementById('registerUsername').value = '';
+                document.getElementById('registerPassword').value = '';
+            } catch (error) {
+                showError(error.message);
+            }
+        }
+
+        // Функция входа
+        async function login() {
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            try {
+                // Используем login вместо username, как ожидает API
+                const response = await fetch(serverUrl + '/api/v1/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ login: username, password })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Ошибка входа: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                authToken = data.token;
+                localStorage.setItem('authToken', authToken);
+                
+                document.getElementById('authSection').style.display = 'none';
+                document.getElementById('calculatorSection').style.display = 'block';
+                updateCalculationsList();
+            } catch (error) {
+                showError(error.message);
+            }
+        }
+
+        // Функция вычисления
+        async function calculate() {
+            const expression = expressionInput.value.trim();
+            if (!expression) {
+                showError('Введите выражение!');
+                return;
+            }
+            
+            try {
+                calculateBtn.disabled = true;
+                calculateBtn.textContent = 'Вычисляю...';
+                
+                const response = await fetch(serverUrl + '/api/v1/calculate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + authToken
+                    },
+                    body: JSON.stringify({ expression })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Ошибка запроса: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const calculationId = data.id.toString();
+                
+                // Сохраняем вычисление в Map и localStorage
+                calculations.set(calculationId, {
+                    expression: expression,
+                    status: 'pending',
+                    result: null,
+                    timestamp: new Date().toLocaleTimeString(),
+                    startTime: Date.now()
+                });
+                
+                localStorage.setItem('savedCalculations', 
+                                JSON.stringify(Array.from(calculations.entries())));
+                
+                statusElement.textContent = `Ожидание результата для выражения: ${expression}`;
+                updateCalculationsList();
+                
+                // Начинаем опрос результата
+                setTimeout(() => checkResult(calculationId), 1000);
+                
+                expressionInput.value = '';
+            } catch (error) {
+                showError(error.message);
+                statusElement.textContent = '';
+            } finally {
+                calculateBtn.disabled = false;
+                calculateBtn.textContent = 'Вычислить';
+            }
+        }
+
+        // ПРОСТАЯ функция проверки результата вычисления
+        async function checkResult(id) {
+            console.log('Проверяем результат для ID:', id);
+            
+            try {
+                // Запрос к API
+                const response = await fetch(`${serverUrl}/api/v1/expressions/${id}`, {
+                    headers: { 'Authorization': 'Bearer ' + authToken }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Ошибка получения результата: ${response.status}`);
+                }
+                
+                // Получаем текст ответа для отладки
+                const responseText = await response.text();
+                console.log('Ответ сервера:', responseText);
+                
+                // Парсим JSON
+                let data;
+                try {
+                    data = JSON.parse(responseText);
+                } catch (e) {
+                    throw new Error('Неверный формат JSON в ответе');
+                }
+                
+                // Получаем вычисление из нашего хранилища
+                const calculation = calculations.get(id);
+                if (!calculation) {
+                    throw new Error('Вычисление не найдено в хранилище');
+                }
+                
+                // Определяем статус и результат
+                let status, result;
+                
+                // Вариант 1: данные в корне объекта
+                if (data.status !== undefined) {
+                    status = data.status;
+                    result = data.result;
+                } 
+                // Вариант 2: данные в поле expression
+                else if (data.expression && data.expression.status !== undefined) {
+                    status = data.expression.status;
+                    result = data.expression.result;
+                }
+                // Вариант 3: не можем определить
+                else {
+                    console.warn('Неизвестный формат ответа:', data);
+                    status = 'unknown';
+                    result = 'Неизвестный формат ответа';
+                }
+                
+                // Обновляем наше вычисление
+                calculation.status = status;
+                calculation.result = result;
+                
+                // Если вычисление завершено, рассчитываем время выполнения
+                if (status === 'completed' && calculation.startTime) {
+                    calculation.executionTime = (Date.now() - calculation.startTime) / 1000;
+                }
+                
+                // Сохраняем обновленные данные
+                localStorage.setItem('savedCalculations', 
+                                JSON.stringify(Array.from(calculations.entries())));
+                
+                // Обновляем UI
+                updateCalculationsList();
+                
+                // Обновляем элементы статуса и результата
+                if (status === 'completed') {
+                    resultElement.textContent = `Результат: ${result}`;
+                    statusElement.textContent = `Вычисление завершено за ${calculation.executionTime.toFixed(1)} сек.`;
+                } else if (status === 'error') {
+                    resultElement.textContent = '';
+                    statusElement.textContent = '';
+                    showError(`Ошибка вычисления: ${result}`);
+                } else {
+                    // Если вычисление не завершено, продолжаем опрос
+                    statusElement.textContent = status === 'pending' ? 
+                        'Ожидание начала вычисления...' : 'Выполняется вычисление...';
+                    
+                    // Продолжаем опрос с интервалом в 1 секунду
+                    setTimeout(() => checkResult(id), 1000);
+                }
+            } catch (error) {
+                console.error('Ошибка при проверке результата:', error);
+                showError(error.message);
+                
+                // Обновляем вычисление, если оно существует
+                if (calculations.has(id)) {
+                    const calc = calculations.get(id);
+                    calc.status = 'error';
+                    calc.result = error.message;
+                    localStorage.setItem('savedCalculations', 
+                                    JSON.stringify(Array.from(calculations.entries())));
+                    updateCalculationsList();
+                }
+            }
+        }
+
+        // Функция обновления списка вычислений
+        async function updateCalculationsList() {
+            try {
+                // Если есть токен, получаем историю с сервера
+                if (authToken) {
+                    const response = await fetch(`${serverUrl}/api/v1/expressions`, {
+                        headers: { 'Authorization': 'Bearer ' + authToken }
+                    });
+                    
+                    if (response.ok) {
+                        const responseText = await response.text();
+                        console.log('Список выражений (сырой ответ):', responseText);
+                        
+                        try {
+                            const data = JSON.parse(responseText);
+                            const expressions = Array.isArray(data) ? data : (data.expressions || []);
+                            
+                            // Обновляем локальное хранилище
+                            for (const expr of expressions) {
+                                if (!calculations.has(expr.id.toString())) {
+                                    calculations.set(expr.id.toString(), {
+                                        expression: expr.expression,
+                                        status: expr.status,
+                                        result: expr.result,
+                                        timestamp: new Date().toLocaleTimeString()
+                                    });
+                                }
+                            }
+                            
+                            // Сохраняем в localStorage
+                            localStorage.setItem('savedCalculations', 
+                                            JSON.stringify(Array.from(calculations.entries())));
+                        } catch (e) {
+                            console.error('Ошибка парсинга JSON списка выражений:', e);
+                        }
+                    }
+                }
+                
+                // Очищаем текущий список
+                calculationsList.innerHTML = '';
+                
+                // Сортируем вычисления по времени (последние наверху)
+                const sortedCalculations = Array.from(calculations.entries())
+                    .sort((a, b) => {
+                        const timeA = a[1].startTime || 0;
+                        const timeB = b[1].startTime || 0;
+                        return timeB - timeA;
+                    });
+                
+                // Выводим не более 10 элементов
+                for (const [id, calc] of sortedCalculations.slice(0, 10)) {
+                    const item = document.createElement('div');
+                    item.className = 'calculation-item';
+                    
+                    const statusText = {
+                        'pending': 'Ожидает вычисления',
+                        'processing': 'Вычисляется',
+                        'completed': 'Вычислено',
+                        'error': 'Ошибка'
+                    }[calc.status] || calc.status;
+                    
+                    let executionTimeInfo = '';
+                    if (calc.executionTime) {
+                        executionTimeInfo = `<div><small>Время выполнения: ${calc.executionTime.toFixed(1)} сек.</small></div>`;
+                    }
+                    
+                    item.innerHTML = `
+                        <div><strong>Выражение:</strong> ${calc.expression}</div>
+                        <div class="${calc.status}"><strong>Статус:</strong> ${statusText}</div>
+                        ${calc.result !== null ? `<div><strong>Результат:</strong> ${calc.result}</div>` : ''}
+                        ${executionTimeInfo}
+                        <div><small>Время запроса: ${calc.timestamp}</small></div>
+                    `;
+                    
+                    calculationsList.appendChild(item);
+                }
+            } catch (error) {
+                console.error('Ошибка при обновлении списка вычислений:', error);
+            }
+        }
+
+        function showError(message) {
+            errorElement.textContent = message;
+            setTimeout(() => {
+                errorElement.textContent = '';
+            }, 5000); // Скрываем ошибку через 5 секунд
+        }
+    </script>
+</body>
+</html>

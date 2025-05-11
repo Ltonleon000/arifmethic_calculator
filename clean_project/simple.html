@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Калькулятор</title>
+    <style>
+        body { font-family: Arial; max-width: 600px; margin: 20px auto; }
+        h1 { text-align: center; }
+        .card { background: #f5f5f5; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        input { width: 100%; padding: 10px; margin-bottom: 15px; box-sizing: border-box; }
+        button { background: #4CAF50; color: white; border: none; padding: 10px; width: 100%; cursor: pointer; }
+        button:hover { background: #45a049; }
+        .result { background: #e8f5e9; padding: 10px; display: none; margin-top: 15px; }
+        .error { background: #ffebee; color: red; padding: 10px; display: none; margin-top: 15px; }
+        .history-item { border: 1px solid #ddd; padding: 10px; margin: 10px 0; }
+        .status-pending { color: orange; }
+        .status-completed { color: green; }
+        .status-error { color: red; }
+        .auth-section { display: flex; margin-bottom: 20px; }
+        .auth-section > div { flex: 1; }
+        .auth-section > div:first-child { margin-right: 10px; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <h1>Калькулятор с авторизацией</h1>
+    
+    <!-- Раздел авторизации -->
+    <div id="auth-container">
+        <div class="auth-section">
+            <div class="card">
+                <h2>Регистрация</h2>
+                <input type="text" id="register-login" placeholder="Логин">
+                <input type="password" id="register-password" placeholder="Пароль">
+                <button id="register-button">Зарегистрироваться</button>
+            </div>
+            <div class="card">
+                <h2>Вход</h2>
+                <input type="text" id="login-login" placeholder="Логин">
+                <input type="password" id="login-password" placeholder="Пароль">
+                <button id="login-button">Войти</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Раздел калькулятора (показывается после авторизации) -->
+    <div id="calculator-container" class="hidden">
+        <div class="card">
+            <div id="user-info">
+                <h3>Привет, <span id="username"></span>! <button id="logout-button" style="width: auto; float: right;">Выйти</button></h3>
+            </div>
+            <input type="text" id="expression" placeholder="Введите выражение (2+2*3)">
+            <button id="calculate">Вычислить</button>
+            <div id="result" class="result"></div>
+            <div id="error" class="error"></div>
+        </div>
+        
+        <div class="card">
+            <h2>История вычислений</h2>
+            <div id="history-list"></div>
+        </div>
+    </div>
+    
+    <script>
+        // Настройки API
+        const API_URL = 'http://localhost:8081';
+        let authToken = localStorage.getItem('token');
+        let currentUsername = localStorage.getItem('username');
+        
+        // Элементы интерфейса
+        const authContainer = document.getElementById('auth-container');
+        const calculatorContainer = document.getElementById('calculator-container');
+        const usernameElement = document.getElementById('username');
+        
+        // Элементы для регистрации
+        const registerLoginInput = document.getElementById('register-login');
+        const registerPasswordInput = document.getElementById('register-password');
+        const registerButton = document.getElementById('register-button');
+        
+        // Элементы для входа
+        const loginLoginInput = document.getElementById('login-login');
+        const loginPasswordInput = document.getElementById('login-password');
+        const loginButton = document.getElementById('login-button');
+        const logoutButton = document.getElementById('logout-button');
+        
+        // Элементы калькулятора
+        const expressionInput = document.getElementById('expression');
+        const calculateButton = document.getElementById('calculate');
+        const resultElement = document.getElementById('result');
+        const errorElement = document.getElementById('error');
+        const historyList = document.getElementById('history-list');
+        let calculations = [];
+        
+        // Проверка авторизации и отображение нужных разделов
+        function checkAuth() {
+            if (authToken) {
+                authContainer.classList.add('hidden');
+                calculatorContainer.classList.remove('hidden');
+                usernameElement.textContent = currentUsername || 'пользователь';
+                loadHistory(); // Загружаем историю после входа
+            } else {
+                authContainer.classList.remove('hidden');
+                calculatorContainer.classList.add('hidden');
+            }
+        }
+        
+        // Инициализация состояния интерфейса
+        checkAuth();
+        
+        // Функция для отправки API-запросов с токеном
+        async function fetchWithAuth(url, options = {}) {
+            const headers = options.headers || {};
+            
+            if (authToken) {
+                headers['Authorization'] = `Bearer ${authToken}`;
+            }
+            
+            options.headers = {
+                ...headers,
+                'Content-Type': 'application/json'
+            };
+            
+            const response = await fetch(`${API_URL}${url}`, options);
+            
+            if (response.status === 401) {
+                // Токен не действителен, выходим
+                logout();
+            }
+            
+            return response;
+        }
+        
+        // Регистрация пользователя
+        registerButton.addEventListener('click', async () => {
+            const login = registerLoginInput.value.trim();
+            const password = registerPasswordInput.value.trim();
+            
+            if (!login || !password) {
+                alert('Введите логин и пароль');
+                return;
+            }
+            
+            try {
+                registerButton.disabled = true;
+                registerButton.textContent = 'Регистрация...';
+                
+                const response = await fetch(`${API_URL}/api/v1/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ login, password })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Ошибка регистрации: ${response.status}`);
+                }
+                
+                alert('Регистрация успешна! Теперь вы можете войти.');
+                loginLoginInput.value = login;
+                registerLoginInput.value = '';
+                registerPasswordInput.value = '';
+            } catch (error) {
+                alert(error.message);
+            } finally {
+                registerButton.disabled = false;
+                registerButton.textContent = 'Зарегистрироваться';
+            }
+        });
+        
+        // Вход пользователя
+        loginButton.addEventListener('click', async () => {
+            const login = loginLoginInput.value.trim();
+            const password = loginPasswordInput.value.trim();
+            
+            if (!login || !password) {
+                alert('Введите логин и пароль');
+                return;
+            }
+            
+            try {
+                loginButton.disabled = true;
+                loginButton.textContent = 'Вход...';
+                
+                const response = await fetch(`${API_URL}/api/v1/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ login, password })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Ошибка входа: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                authToken = data.token;
+                currentUsername = login;
+                
+                localStorage.setItem('token', authToken);
+                localStorage.setItem('username', login);
+                
+                loginLoginInput.value = '';
+                loginPasswordInput.value = '';
+                
+                checkAuth(); // Обновляем состояние интерфейса
+            } catch (error) {
+                alert(error.message);
+            } finally {
+                loginButton.disabled = false;
+                loginButton.textContent = 'Войти';
+            }
+        });
+        
+        // Выход пользователя
+        function logout() {
+            authToken = null;
+            currentUsername = null;
+            localStorage.removeItem('token');
+            localStorage.removeItem('username');
+            calculations = [];
+            checkAuth();
+        }
+        
+        logoutButton.addEventListener('click', logout);
+        
+        // Отправка выражения на вычисление
+        calculateButton.addEventListener('click', async () => {
+            resultElement.style.display = 'none';
+            errorElement.style.display = 'none';
+            
+            const expression = expressionInput.value.trim();
+            if (!expression) {
+                showError('Введите выражение');
+                return;
+            }
+            
+            try {
+                calculateButton.disabled = true;
+                calculateButton.textContent = 'Вычисляем...';
+                
+                const response = await fetchWithAuth('/api/v1/calculate', {
+                    method: 'POST',
+                    body: JSON.stringify({ expression })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Ошибка: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                checkExpressionStatus(data.id);
+                expressionInput.value = '';
+            } catch (error) {
+                showError(error.message);
+                calculateButton.disabled = false;
+                calculateButton.textContent = 'Вычислить';
+            }
+        });
+        
+        // Проверка статуса выражения
+        async function checkExpressionStatus(id) {
+            try {
+                const response = await fetchWithAuth(`/api/v1/expressions/${id}`);
+                
+                if (!response.ok) {
+                    throw new Error(`Ошибка: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const expression = data.expression;
+                updateHistory(expression);
+                
+                if (expression.status === 'completed') {
+                    showResult(`${expression.expression} = ${expression.result}`);
+                    calculateButton.disabled = false;
+                    calculateButton.textContent = 'Вычислить';
+                } else if (expression.status === 'error') {
+                    showError(`Ошибка: ${expression.result}`);
+                    calculateButton.disabled = false;
+                    calculateButton.textContent = 'Вычислить';
+                } else {
+                    setTimeout(() => checkExpressionStatus(id), 1000);
+                }
+            } catch (error) {
+                showError(error.message);
+                calculateButton.disabled = false;
+                calculateButton.textContent = 'Вычислить';
+            }
+        }
+        
+        // Обновление истории выражений
+        function updateHistory(expression) {
+            const existingIndex = calculations.findIndex(item => item.id === expression.id);
+            if (existingIndex !== -1) {
+                calculations[existingIndex] = expression;
+            } else {
+                calculations.unshift(expression);
+            }
+            
+            if (calculations.length > 10) calculations = calculations.slice(0, 10);
+            renderHistory();
+        }
+        
+        // Отображение истории выражений
+        function renderHistory() {
+            historyList.innerHTML = '';
+            
+            if (calculations.length === 0) {
+                historyList.innerHTML = '<p>История пуста</p>';
+                return;
+            }
+            
+            calculations.forEach(item => {
+                const historyItem = document.createElement('div');
+                historyItem.className = 'history-item';
+                
+                const statusClass = `status-${item.status}`;
+                const statusText = {
+                    'pending': 'Ожидает',
+                    'processing': 'Вычисляется',
+                    'completed': 'Готово',
+                    'error': 'Ошибка'
+                }[item.status] || item.status;
+                
+                historyItem.innerHTML = `
+                    <div><strong>Выражение:</strong> ${item.expression}</div>
+                    <div class="${statusClass}"><strong>Статус:</strong> ${statusText}</div>
+                    ${item.result !== null ? `<div><strong>Результат:</strong> ${item.result}</div>` : ''}
+                `;
+                
+                historyList.appendChild(historyItem);
+            });
+        }
+        
+        // Загрузка истории выражений
+        async function loadHistory() {
+            try {
+                const response = await fetchWithAuth('/api/v1/expressions');
+                
+                if (!response.ok) return;
+                
+                const data = await response.json();
+                if (data.expressions && data.expressions.length > 0) {
+                    calculations = data.expressions;
+                    renderHistory();
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки истории:', error);
+            }
+        }
+        
+        // Отображение результата
+        function showResult(message) {
+            resultElement.textContent = message;
+            resultElement.style.display = 'block';
+        }
+        
+        // Отображение ошибки
+        function showError(message) {
+            errorElement.textContent = message;
+            errorElement.style.display = 'block';
+        }
+    </script>
+</body>
+</html>

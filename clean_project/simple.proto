@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package calculator;
+
+option go_package = "calculator/internal/calculatorpb";
+
+// Сервис калькулятора
+service CalculatorService {
+  // Вычислить выражение
+  rpc Calculate(CalculateRequest) returns (CalculateResponse);
+}
+
+// Запрос на вычисление выражения
+message CalculateRequest {
+  string expression = 1;
+}
+
+// Ответ с результатом вычисления
+message CalculateResponse {
+  string result = 1;
+}
